@@ -11,17 +11,17 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/dsnet/compress/brotli"
 )
 
-const burl = "http://share.dmhy.org"
+const burl = "https://share.dmhy.org"
 
-const curl = "http://share.dmhy.org/topics/list/page/2?keyword=%E5%A6%82%E6%9E%9C%E6%9C%89%E5%A6%B9%E5%A6%B9"
-
-const MAX_PAGE_NUM = 3
+const MAX_PAGE_NUM = 5
 
 type FUrlInfo struct {
 	dtype      string
@@ -29,6 +29,7 @@ type FUrlInfo struct {
 	title      string
 	url        string
 	size       string
+	simple     string
 }
 
 type DirInfo struct {
@@ -40,7 +41,7 @@ type DirInfo struct {
 func (d *DirInfo) dealDir() {
 	dir := "./data/" + d.dirName
 	if _checkFileExist(dir) {
-		fmt.Println(dir, "已存在")
+		log("已存在", dir)
 	} else {
 		os.Mkdir(dir, os.ModePerm)
 		d.dirName = dir
@@ -63,16 +64,9 @@ func (d *DirInfo) dealDM() {
 var fileList []string
 
 func main() {
-	//_sendGetReq(curl)
-	//_dealFPageHtml(ret)
-	//var f FUrlInfo
-	//_readList(name)
-	//url := "http://share.dmhy.org/topics/view/476365_10_07_BIG5_1080P_MP4.html"
-	//_sendSonGetReq(&FUrlInfo{url: url})
 	slc := _getDMName()
 	for _, dirinfo := range slc {
 		dirinfo.dealDir()
-
 	}
 }
 
@@ -128,7 +122,6 @@ func _getDMName() []DirInfo {
 }
 
 func (d *DirInfo) sendGetReq(url string) {
-	fmt.Println(url)
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
 	req.Header.Add("Host", "share.dmhy.org")
@@ -143,16 +136,18 @@ func (d *DirInfo) sendGetReq(url string) {
 	req.Header.Add("If-Modified-Since", "Tue, 02 Jan 2018 09:54:56 GMT")
 	req.Header.Add("Cache-Control", "max-age=0")
 	if err != nil {
-		fmt.Println("请求失败")
-		panic(err)
+		fmt.Println("创建请求失败")
+		log("请求失败", d.thisDM)
+		return
 	}
 	resq, err := client.Do(req)
 	if err != nil {
 		fmt.Println("发送失败")
+		log("发送请求失败", d.thisDM)
+		return
 	}
 	defer resq.Body.Close()
 
-	//reader, _ := gzip.NewReader(resq.Body)
 	entype := resq.Header.Get("content-encoding")
 	switch entype {
 	case "br":
@@ -176,7 +171,7 @@ func (d *DirInfo) sendGetReq(url string) {
 }
 
 func (d *DirInfo) sendSonGetReq(f *FUrlInfo) {
-	time.Sleep(5 * time.Second)
+	time.Sleep(2 * time.Second)
 	url := f.url
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
@@ -193,10 +188,14 @@ func (d *DirInfo) sendSonGetReq(f *FUrlInfo) {
 	if err != nil {
 		fmt.Println("请求失败")
 		panic(err)
+		log("请求失败", d.thisDM)
+		return
 	}
 	resq, err := client.Do(req)
 	if err != nil {
 		fmt.Println("发送失败")
+		log("发送请求失败", d.thisDM)
+		return
 	}
 	defer resq.Body.Close()
 
@@ -208,19 +207,23 @@ func (d *DirInfo) sendSonGetReq(f *FUrlInfo) {
 func (d *DirInfo) dealFPageHtml(r io.Reader) {
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
-		fmt.Println("html解析出错")
+		log("html解析出错，应该是相应结果为空", d.thisDM)
+		return
 	}
 	//ret, _ := doc.Find("div.clear").Find("tr").Find("td.title").Find("span.tag").Find("a").Attr("href")
 	//fmt.Println(ret.Text())
 	doc.Find("div.clear").Find("tbody").Find("tr").Each(func(index int, sel *goquery.Selection) {
 		dtype := sel.Find("td").Eq(1).Find("font").Text()
-		fmt.Println(dtype)
 		if dtype == "季度全集" {
 			authorName := sel.Find("td.title").Find("span.tag").Find("a").Text()
 			fhtml := sel.Find("td.title").Find("[target='_blank']")
 			size := sel.Find("[nowrap='nowrap']").Eq(1).Text()
-			surl, _ := fhtml.Attr("href")
-			title := fhtml.Text()
+			surl, aru := fhtml.Attr("href")
+			if !aru {
+				log("未获取到url", f.title+f.size)
+				return
+			}
+			title := _delStrSpa(fhtml.Text())
 			surl = burl + surl
 
 			var finfo FUrlInfo
@@ -229,9 +232,9 @@ func (d *DirInfo) dealFPageHtml(r io.Reader) {
 			finfo.title = title
 			finfo.url = surl
 			finfo.size = size
-			//d.sendSonGetReq(&finfo)
-			fmt.Println(finfo)
-			//fmt.Println("*************")
+			//fmt.Println(title)
+			//fmt.Println([]byte(title))
+			d.sendSonGetReq(&finfo)
 		}
 	})
 	//_saveInFile(str)
@@ -241,53 +244,102 @@ func (d *DirInfo) dealSonPageHtml(r io.Reader, f *FUrlInfo) {
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
 		fmt.Println("html解析出错")
+		log("html解析出错，应该是相应结果为空", d.thisDM)
 		return
 	}
 	torrUrl, _ := doc.Find("div#tabs-1").Find("a").Eq(0).Attr("href")
 	magStr, _ := doc.Find("div#tabs-1").Find("a").Eq(1).Attr("href")
-	//	fmt.Println(torrUrl, magStr)
+	simple, _ := doc.Find(".topic-nfo").Html()
 	d.makeSonDir()
 	d.downLoadTorr(torrUrl, f)
 	d.saveMagStr(magStr, f)
+	d.saveSimStr(simple, f)
 }
 
 func (d *DirInfo) makeSonDir() {
-	dir := d.dirName + d.thisDM
+	dir := d.dirName + "/" + d.thisDM
 	if !_checkFileExist(dir) {
 		os.Mkdir(dir, os.ModePerm)
 	}
 }
 
 func (d *DirInfo) downLoadTorr(torrUrl string, f *FUrlInfo) {
-	torrUrl = "http:" + torrUrl
+	torrUrl = "https:" + torrUrl
 	res, err := http.Get(torrUrl)
 	defer res.Body.Close()
 	file := d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + ".torrent"
 	if err != nil {
 		fmt.Println("下载失败")
-		return
+		log("下载torr文件失败,尝试第二次下载", f.title+f.size)
+		res, err = http.Get(torrUrl)
+		if err != nil {
+			log("第二次下载失败", f.title+f.size)
+			return
+		}
 	}
 	if _checkFileExist(file) {
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		num := r.Intn(100)
 		file = d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + string(num) + ".torrent"
 	}
-	fp, _ := os.Create(file)
+	fmt.Println(file)
+	fp, err := os.Create(file)
+	defer fp.Close()
+	if err != nil {
+		fmt.Println("torr创建失败")
+		log("创建torr文件失败", f.title+f.size)
+		return
+	}
 	io.Copy(fp, res.Body)
+	log("torr文件下载成功", f.title+f.size)
 }
 
 func (d *DirInfo) saveMagStr(str string, f *FUrlInfo) {
-	file := d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + ".txt"
+	file := d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + "_" + "mag" + ".txt"
 	if _checkFileExist(file) {
 		r := rand.New(rand.NewSource(time.Now().UnixNano()))
 		num := r.Intn(100)
-		file = d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + string(num) + ".txt"
+		file = d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + string(num) + "_" + "mag" + ".txt"
 	}
-	fp, _ := os.Create(file)
-	_, err := io.WriteString(fp, str)
+	fmt.Println(file)
+	fp, err := os.Create(file)
+	if err != nil {
+		fmt.Println("创建文件失败")
+		log("创建mag文件失败", f.title+f.size)
+		return
+	}
+	defer fp.Close()
+	_, err = io.WriteString(fp, str)
 	if err != nil {
 		fmt.Println("写入mag失败")
+		log("写入mag失败", f.title+f.size)
+		return
 	}
+	log("mag文件写入成功", f.title+f.size)
+}
+
+func (d *DirInfo) saveSimStr(str string, f *FUrlInfo) {
+	file := d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + "_" + "simple" + ".txt"
+	if _checkFileExist(file) {
+		r := rand.New(rand.NewSource(time.Now().UnixNano()))
+		num := r.Intn(100)
+		file = d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + string(num) + "_" + "simple" + ".txt"
+	}
+	fmt.Println(file)
+	fp, err := os.Create(file)
+	if err != nil {
+		fmt.Println("创建文件失败")
+		log("创建简介文件失败", f.title+f.size)
+		return
+	}
+	defer fp.Close()
+	_, err = io.WriteString(fp, str)
+	if err != nil {
+		fmt.Println("写入简介失败")
+		log("写入简介文件失败", f.title+f.size)
+		return
+	}
+	log("写入简介文件成功", f.title+f.size)
 }
 
 func _saveInFile(slc []string) {
@@ -317,4 +369,28 @@ func _checkFileExist(f string) bool {
 		exist = false
 	}
 	return exist
+}
+
+func _delStrSpa(str string) string {
+	strSlc := strings.FieldsFunc(str, unicode.IsSpace)
+	var nstr string
+	for _, v := range strSlc {
+		nstr = nstr + v
+	}
+	nstr = strings.Replace(str, ".", "_", -1)
+	nstr = strings.Replace(str, "/", "_", -1)
+	bslc := []byte(nstr)
+	bslc = bslc[5:]
+	return string(bslc)
+}
+
+func log(state string, name string) {
+	time := time.Now().Format("2006-01-02 15:04:05")
+	str := time + " " + "[" + name + "]" + " " + state + "\n"
+	f, err := os.OpenFile("log.txt", os.O_WRONLY|os.O_APPEND, 0644)
+	defer f.Close()
+	if err != nil {
+		fmt.Println("open log.txt err ")
+	}
+	io.WriteString(f, str)
 }
