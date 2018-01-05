@@ -51,12 +51,15 @@ func (d *DirInfo) dealDir() {
 
 func (d *DirInfo) dealDM() {
 	for _, dmName := range d.dmList {
-		d.thisDM = dmName
-		dmNameEnCode := url.QueryEscape(dmName)
-		for i := 1; i <= MAX_PAGE_NUM; i++ {
-			page := fmt.Sprintf("page/%v", i)
-			url := "https://share.dmhy.org/topics/list/" + page + "?keyword=" + dmNameEnCode
-			d.sendGetReq(url)
+		nameSlc := strings.Split(dmName, "|")
+		d.thisDM = nameSlc[0]
+		for _, sName := range nameSlc {
+			dmNameEnCode := url.QueryEscape(sName)
+			for i := 1; i <= MAX_PAGE_NUM; i++ {
+				page := fmt.Sprintf("page/%v", i)
+				url := "https://share.dmhy.org/topics/list/" + page + "?keyword=" + dmNameEnCode
+				d.sendGetReq(url)
+			}
 		}
 	}
 }
@@ -111,7 +114,7 @@ func _getDMName() []DirInfo {
 		for _, file := range fileList {
 			var dirInfo DirInfo
 			nameList := _readFile(file)
-			dirInfo.dirName = file
+			dirInfo.dirName = _delFix(file)
 			for _, dmName := range nameList {
 				dirInfo.dmList = append(dirInfo.dmList, dmName)
 			}
@@ -160,18 +163,10 @@ func (d *DirInfo) sendGetReq(url string) {
 		reader, _ := gzip.NewReader(resq.Body)
 		d.dealFPageHtml(reader)
 	}
-	//ret, err := ioutil.ReadAll(reader)
-	//fmt.Println(string(ret))
-	//log := "./log/log.txt"
-	//f, _ := os.Create(log)
-	//_, err = io.WriteString(f, string(ret))
-	//if err != nil {
-	//	fmt.Println("写入失败")
-	//}
 }
 
 func (d *DirInfo) sendSonGetReq(f *FUrlInfo) {
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 	url := f.url
 	client := &http.Client{}
 	req, err := http.NewRequest("GET", url, nil)
@@ -210,8 +205,6 @@ func (d *DirInfo) dealFPageHtml(r io.Reader) {
 		log("html解析出错，应该是相应结果为空", d.thisDM)
 		return
 	}
-	//ret, _ := doc.Find("div.clear").Find("tr").Find("td.title").Find("span.tag").Find("a").Attr("href")
-	//fmt.Println(ret.Text())
 	doc.Find("div.clear").Find("tbody").Find("tr").Each(func(index int, sel *goquery.Selection) {
 		dtype := sel.Find("td").Eq(1).Find("font").Text()
 		if dtype == "季度全集" {
@@ -219,11 +212,11 @@ func (d *DirInfo) dealFPageHtml(r io.Reader) {
 			fhtml := sel.Find("td.title").Find("[target='_blank']")
 			size := sel.Find("[nowrap='nowrap']").Eq(1).Text()
 			surl, aru := fhtml.Attr("href")
+			title := _delStrSpa(fhtml.Text())
 			if !aru {
-				log("未获取到url", f.title+f.size)
+				log("未获取到url", title)
 				return
 			}
-			title := _delStrSpa(fhtml.Text())
 			surl = burl + surl
 
 			var finfo FUrlInfo
@@ -241,6 +234,7 @@ func (d *DirInfo) dealFPageHtml(r io.Reader) {
 }
 
 func (d *DirInfo) dealSonPageHtml(r io.Reader, f *FUrlInfo) {
+	time.Sleep(2 * time.Second)
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
 		fmt.Println("html解析出错")
@@ -282,7 +276,7 @@ func (d *DirInfo) downLoadTorr(torrUrl string, f *FUrlInfo) {
 		num := r.Intn(100)
 		file = d.dirName + "/" + d.thisDM + "/" + f.title + "+" + f.size + string(num) + ".torrent"
 	}
-	fmt.Println(file)
+	//fmt.Println(file)
 	fp, err := os.Create(file)
 	defer fp.Close()
 	if err != nil {
@@ -393,4 +387,9 @@ func log(state string, name string) {
 		fmt.Println("open log.txt err ")
 	}
 	io.WriteString(f, str)
+}
+
+func _delFix(str string) string {
+	slc := strings.Split(str, ".")
+	return slc[0]
 }
