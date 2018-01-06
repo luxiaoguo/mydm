@@ -36,6 +36,8 @@ type DirInfo struct {
 	dirName string
 	dmList  []string
 	thisDM  string
+	isFind  bool
+	srcNum  uint
 }
 
 func (d *DirInfo) dealDir() {
@@ -51,6 +53,8 @@ func (d *DirInfo) dealDir() {
 
 func (d *DirInfo) dealDM() {
 	for _, dmName := range d.dmList {
+		d.isFind = false
+		d.srcNum = 0
 		nameSlc := strings.Split(dmName, "|")
 		d.thisDM = nameSlc[0]
 		for _, sName := range nameSlc {
@@ -60,6 +64,11 @@ func (d *DirInfo) dealDM() {
 				url := "https://share.dmhy.org/topics/list/" + page + "?keyword=" + dmNameEnCode
 				d.sendGetReq(url)
 			}
+		}
+		if !d.isFind {
+			unfindList(d.thisDM)
+		} else {
+			finishList(d.thisDM, d.srcNum)
 		}
 	}
 }
@@ -208,6 +217,8 @@ func (d *DirInfo) dealFPageHtml(r io.Reader) {
 	doc.Find("div.clear").Find("tbody").Find("tr").Each(func(index int, sel *goquery.Selection) {
 		dtype := sel.Find("td").Eq(1).Find("font").Text()
 		if dtype == "季度全集" {
+			d.isFind = true
+			d.srcNum++
 			authorName := sel.Find("td.title").Find("span.tag").Find("a").Text()
 			fhtml := sel.Find("td.title").Find("[target='_blank']")
 			size := sel.Find("[nowrap='nowrap']").Eq(1).Text()
@@ -234,7 +245,7 @@ func (d *DirInfo) dealFPageHtml(r io.Reader) {
 }
 
 func (d *DirInfo) dealSonPageHtml(r io.Reader, f *FUrlInfo) {
-	time.Sleep(2 * time.Second)
+	time.Sleep(3 * time.Second)
 	doc, err := goquery.NewDocumentFromReader(r)
 	if err != nil {
 		fmt.Println("html解析出错")
@@ -336,6 +347,10 @@ func (d *DirInfo) saveSimStr(str string, f *FUrlInfo) {
 	log("写入简介文件成功", f.title+f.size)
 }
 
+//func (d *DirInfo) getNextPage(doc *goquery.Document) string{
+
+//}
+
 func _saveInFile(slc []string) {
 	//fmt.Println(file)
 	log := "./log/log.txt"
@@ -381,15 +396,46 @@ func _delStrSpa(str string) string {
 func log(state string, name string) {
 	time := time.Now().Format("2006-01-02 15:04:05")
 	str := time + " " + "[" + name + "]" + " " + state + "\n"
-	f, err := os.OpenFile("log.txt", os.O_WRONLY|os.O_APPEND, 0644)
-	defer f.Close()
-	if err != nil {
-		fmt.Println("open log.txt err ")
+	var f *os.File
+	if _checkFileExist("log.txt") {
+		f, _ = os.OpenFile("log.txt", os.O_WRONLY|os.O_APPEND, 0644)
+	} else {
+		f, _ = os.Create("log.txt")
 	}
+	defer f.Close()
+	//	if err != nil {
+	//		fmt.Println("open log.txt err ")
+	//	}
 	io.WriteString(f, str)
 }
 
 func _delFix(str string) string {
 	slc := strings.Split(str, ".")
 	return slc[0]
+}
+
+func unfindList(name string) {
+	str := name + "未找到资源"
+	var f *os.File
+	if _checkFileExist("unfind.txt") {
+		f, _ = os.OpenFile("unfind.txt", os.O_WRONLY|os.O_APPEND, 0644)
+	} else {
+		f, _ = os.Create("unfind.txt")
+	}
+	defer f.Close()
+	str = str + "\n"
+	io.WriteString(f, str)
+}
+
+func finishList(name string, num uint) {
+	str := fmt.Sprintf("%v:%v获取到%v个资源", time.Now().Format("2006-01-02 15:04:05"), name, num)
+	var f *os.File
+	if _checkFileExist("finish.txt") {
+		f, _ = os.OpenFile("finish.txt", os.O_WRONLY|os.O_APPEND, 0644)
+	} else {
+		f, _ = os.Create("finish.txt")
+	}
+	defer f.Close()
+	str = str + "\n"
+	io.WriteString(f, str)
 }
